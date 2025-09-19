@@ -288,28 +288,18 @@ class UMELoss(nn.Module):
         self,
         loss_weights: Dict[str, float] = None,
         use_focal: bool = False,
-        dice_smooth: float = 1e-6,
-        use_voco: bool = False
+        dice_smooth: float = 1e-6
     ):
         super().__init__()
 
         # 默认权重
-        if use_voco:
-            default_weights = {
-                'voco': 1.0,
-                'diversity': 0.1,
-                'contrastive': 0.5,
-                'area': 0.3
-            }
-        else:
-            default_weights = {
-                'segmentation': 1.0,
-                'diversity': 0.1,
-                'consistency': 0.05,
-                'temporal': 0.03
-            }
+        default_weights = {
+            'segmentation': 1.0,
+            'diversity': 0.1,
+            'consistency': 0.05,
+            'temporal': 0.03
+        }
         self.loss_weights = loss_weights or default_weights
-        self.use_voco = use_voco
 
         # 分割损失
         self.dice_loss = DiceLoss(smooth=dice_smooth)
@@ -322,12 +312,6 @@ class UMELoss(nn.Module):
         self.temporal_loss = TemporalConsistencyLoss()
         self.area_prediction_loss = AreaPredictionLoss()  # 添加面积预测损失
 
-        # VoCo损失
-        if use_voco:
-            # 延迟导入避免循环依赖
-            from ume.utils.voco_supervision import VoCoLoss
-            self.voco_loss = VoCoLoss(temperature=0.07, lambda_area=1.0)
-
     def forward(
         self,
         predictions: Optional[torch.Tensor] = None,
@@ -336,10 +320,6 @@ class UMELoss(nn.Module):
         selected_frames: Optional[torch.Tensor] = None,
         strategy_features: Optional[Dict[str, torch.Tensor]] = None,
         temporal_features: Optional[torch.Tensor] = None,
-        # VoCo相关参数
-        main_features: Optional[torch.Tensor] = None,
-        neighbor_features: Optional[torch.Tensor] = None,
-        overlap_areas: Optional[torch.Tensor] = None,
         # 面积预测相关参数
         area_predictions: Optional[torch.Tensor] = None,
         masks: Optional[torch.Tensor] = None,
@@ -351,20 +331,8 @@ class UMELoss(nn.Module):
         losses = {}
         total_loss = 0.0
 
-        # VoCo训练模式
-        if self.use_voco and main_features is not None and neighbor_features is not None and overlap_areas is not None:
-            voco_results = self.voco_loss(main_features, neighbor_features, overlap_areas)
-
-            losses['voco_total_loss'] = voco_results['total_loss']
-            losses['contrastive_loss'] = voco_results['contrastive_loss']
-            losses['area_loss'] = voco_results['area_loss']
-
-            total_loss += self.loss_weights['voco'] * voco_results['total_loss']
-            total_loss += self.loss_weights.get('contrastive', 0.0) * voco_results['contrastive_loss']
-            total_loss += self.loss_weights.get('area', 0.0) * voco_results['area_loss']
-
-        # 分割损失 (用于传统训练模式)
-        elif predictions is not None and targets is not None:
+        # 分割损失 (主要训练模式)
+        if predictions is not None and targets is not None:
             if targets.dim() == predictions.dim() - 1:
                 # targets: [B, H, W], predictions: [B, C, H, W]
                 seg_loss_ce = self.ce_loss(predictions, targets.long())

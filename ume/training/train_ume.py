@@ -57,10 +57,8 @@ class UMETrainer:
 
         # 设置损失函数和评估指标
         # 使用标准分割损失函数
-        self.use_voco = False  # 改为标准分割训练模式
         self.criterion = UMELoss(
-            loss_weights=config['training']['loss_weights'],
-            use_voco=False  # 禁用VoCo训练模式
+            loss_weights=config['training']['loss_weights']
         )
         self.metrics = UMEMetrics()
 
@@ -257,18 +255,13 @@ class UMETrainer:
         for key in epoch_losses:
             epoch_losses[key] /= num_batches
 
-        # VoCo模式和传统模式不同的指标计算
-        if hasattr(self, 'use_voco') and self.use_voco:
-            # VoCo模式：只返回损失，不计算分割指标
-            return epoch_losses
-        else:
-            # 传统模式：计算分割指标
-            avg_metrics = {
-                'dice': np.mean(metrics_accumulator['dice']) if metrics_accumulator['dice'] else 0.0,
-                'iou': np.mean(metrics_accumulator['iou']) if metrics_accumulator['iou'] else 0.0
-            }
-            epoch_losses.update(avg_metrics)
-            return epoch_losses
+        # 计算分割指标
+        avg_metrics = {
+            'dice': np.mean(metrics_accumulator['dice']) if metrics_accumulator['dice'] else 0.0,
+            'iou': np.mean(metrics_accumulator['iou']) if metrics_accumulator['iou'] else 0.0
+        }
+        epoch_losses.update(avg_metrics)
+        return epoch_losses
 
     def frame_by_frame_validation(self) -> Dict[str, float]:
         """
@@ -331,32 +324,17 @@ class UMETrainer:
             # 更新学习率
             self.scheduler.step()
 
-            # 记录日志 - VoCo模式和传统模式不同
-            if hasattr(self, 'use_voco') and self.use_voco:
-                # VoCo模式日志
-                self.logger.info(
-                    f"Epoch {epoch}: "
-                    f"Train Loss: {train_losses['total']:.4f}, "
-                    f"Val Loss: {val_losses['total']:.4f}, "
-                    f"Val VoCo: {val_losses['voco']:.4f}, "
-                    f"Val Div: {val_losses['diversity']:.4f}"
-                )
-                # VoCo模式下以总损失的降低作为最佳模型标准
-                if val_losses['total'] < getattr(self, 'best_loss', float('inf')):
-                    self.best_loss = val_losses['total']
-                    self.save_checkpoint(is_best=True)
-            else:
-                # 传统模式日志
-                self.logger.info(
-                    f"Epoch {epoch}: "
-                    f"Train Loss: {train_losses['total']:.4f}, "
-                    f"Val Loss: {val_losses['total']:.4f}, "
-                    f"Val Dice: {val_losses['dice']:.4f}"
-                )
-                # 保存最佳模型
-                if val_losses['dice'] > self.best_dice:
-                    self.best_dice = val_losses['dice']
-                    self.save_checkpoint(is_best=True)
+            # 记录日志
+            self.logger.info(
+                f"Epoch {epoch}: "
+                f"Train Loss: {train_losses['total']:.4f}, "
+                f"Val Loss: {val_losses['total']:.4f}, "
+                f"Val Dice: {val_losses['dice']:.4f}"
+            )
+            # 保存最佳模型
+            if val_losses['dice'] > self.best_dice:
+                self.best_dice = val_losses['dice']
+                self.save_checkpoint(is_best=True)
 
             # 定期保存检查点
             if (epoch + 1) % 10 == 0:
